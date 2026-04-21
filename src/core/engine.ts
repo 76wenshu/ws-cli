@@ -6,6 +6,7 @@ import { loadConfig } from '../config'
 import { executePlugin, pluginManager } from '../plugins'
 import { learnFromText, addFeedback, getFeedbackStats, formatHistory, addEvent, getPreferencePrompt } from '../evolve'
 import { addXp, recordPattern, getEvolutionPrompt, getEvolutionSummary, updatePersonality } from '../evolve'
+import { exportData, importData, getSyncManager } from '../sync'
 
 const CONFIG = {
   HOT_SIZE: 20,
@@ -118,6 +119,105 @@ const rules: Array<{ pattern: RegExp; response: (match: string[], memory: FullMe
       const summary = await getEvolutionSummary()
       const history = await formatHistory()
       return summary + '\n\n' + history
+    }
+  },
+  {
+    // 导出数据
+    pattern: /^:export(?:\s+(.+))?$/i,
+    response: async (match) => {
+      const outputPath = match[1]?.trim()
+      const result = await exportData({ outputPath: outputPath || undefined })
+      if (result.success) {
+        return `✅ 数据已导出到：${result.filePath}\n请将此文件复制到其他设备后使用 :import 导入`
+      }
+      return `❌ 导出失败：${result.error}`
+    }
+  },
+  {
+    // 导入数据
+    pattern: /^:import(?:\s+(.+))?$/i,
+    response: async (match) => {
+      const zipPath = match[1]?.trim()
+      if (!zipPath) {
+        return '用法：:import <备份文件路径>\n示例：:import ./handsome-backup.zip'
+      }
+      const result = await importData(zipPath)
+      if (result.success) {
+        return `✅ ${result.message}\n请重新启动 HandSome 使数据生效`
+      }
+      return `❌ 导入失败：${result.error}`
+    }
+  },
+  {
+    // 同步命令
+    pattern: /^:sync(?:\s+(.*))?$/i,
+    response: async (match) => {
+      const syncManager = getSyncManager()
+      const args = match[1]?.trim().split(/\s+/) || []
+      const subCmd = args[0]?.toLowerCase()
+
+      // :sync - 启动/查看同步状态
+      if (!subCmd) {
+        const state = syncManager.getState()
+        if (state.enabled) {
+          const deviceList = state.devices.map(d => `• ${d.name} (${d.ip})`).join('\n')
+          return `📡 同步已开启\n服务器: ${state.serverRunning ? '✅ 运行中' : '❌ 停止'}\n设备: ${state.devices.length} 个\n${deviceList || '未发现设备'}`
+        } else {
+          return `📡 同步未开启\n使用 :sync on 开启局域网同步`
+        }
+      }
+
+      // :sync on - 开启同步
+      if (subCmd === 'on') {
+        await syncManager.start()
+        return '📡 同步已开启，正在扫描设备...'
+      }
+
+      // :sync off - 关闭同步
+      if (subCmd === 'off') {
+        syncManager.stop()
+        return '📡 同步已关闭'
+      }
+
+      // :sync list - 查看设备列表
+      if (subCmd === 'list') {
+        const devices = syncManager.getDevices()
+        if (devices.length === 0) {
+          return '未发现附近设备，请确保对方已开启同步'
+        }
+        const list = devices.map((d, i) => `${i + 1}. ${d.name} (${d.ip})`).join('\n')
+        return `发现 ${devices.length} 个设备：\n${list}`
+      }
+
+      // :sync push <序号> - 推送到设备
+      if (subCmd === 'push') {
+        const idx = parseInt(args[1]) - 1
+        const devices = syncManager.getDevices()
+        if (isNaN(idx) || idx < 0 || idx >= devices.length) {
+          return '用法：:sync push <设备序号>\n使用 :sync list 查看设备列表'
+        }
+        const result = await syncManager.push(devices[idx])
+        return result.success ? `✅ ${result.message}` : `❌ ${result.message}`
+      }
+
+      // :sync pull <序号> - 从设备拉取
+      if (subCmd === 'pull') {
+        const idx = parseInt(args[1]) - 1
+        const devices = syncManager.getDevices()
+        if (isNaN(idx) || idx < 0 || idx >= devices.length) {
+          return '用法：:sync pull <设备序号>\n使用 :sync list 查看设备列表'
+        }
+        const result = await syncManager.pull(devices[idx])
+        return result.success ? `✅ ${result.message}\n请重启使数据生效` : `❌ ${result.message}`
+      }
+
+      return `同步命令：
+• :sync - 查看状态
+• :sync on - 开启同步
+• :sync off - 关闭同步
+• :sync list - 查看设备
+• :sync push <序号> - 推送数据到设备
+• :sync pull <序号> - 从设备拉取数据`
     }
   },
   {

@@ -20,14 +20,19 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "archiver": "^7.0.0",
+    "bonjour": "^3.5.0",
     "boxen": "^5.1.2",
     "chalk": "^4.1.2",
     "conf": "^10.2.0",
+    "extract-zip": "^2.0.1",
     "inquirer": "^8.2.5",
     "ora": "^5.4.1",
     "yaml": "^2.8.3"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.2",
+    "@types/bonjour": "^3.5.13",
     "@types/inquirer": "^8.2.10",
     "@types/node": "^20.10.0",
     "@types/yaml": "^1.9.6",
