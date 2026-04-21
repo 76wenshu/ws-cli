@@ -1,0 +1,68 @@
+import chalk from 'chalk'
+import inquirer from 'inquirer'
+import { processInput } from '../core/engine'
+import { loadFullMemory, FullMemory } from '../memory'
+
+const PROMPT = chalk.cyan('HandSome') + chalk.gray(' > ')
+
+export async function run() {
+  // 加载完整记忆
+  const memory: FullMemory = await loadFullMemory()
+
+  while (true) {
+    const { input } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'input',
+        message: PROMPT,
+        prefix: ''
+      }
+    ])
+
+    const trimmed = input.trim()
+
+    // 退出命令
+    if (trimmed === ':q' || trimmed === ':quit' || trimmed === 'quit' || trimmed === 'exit') {
+      console.log(chalk.gray('\n再见！下次见~ 👋\n'))
+      break
+    }
+
+    // 帮助命令
+    if (trimmed === ':help' || trimmed === 'help') {
+      printHelp()
+      continue
+    }
+
+    // 空输入跳过
+    if (!trimmed) {
+      continue
+    }
+
+    // 处理输入并获取响应
+    try {
+      const response = await processInput(trimmed, memory)
+
+      // 检查是否是退出命令
+      if (response === '__EXIT__') {
+        console.log(chalk.gray('\n再见！下次见~ 👋\n'))
+        break
+      }
+
+      console.log(chalk.white(response) + '\n')
+    } catch (error: any) {
+      console.log(chalk.red(`\n出了问题: ${error.message}\n`))
+    }
+  }
+}
+
+function printHelp() {
+  console.log(chalk.gray(`
+  可用命令:
+    :q, quit, exit    退出
+    :help, help       显示帮助
+    :forget           清除所有记忆
+    :memory, :记忆    查看记忆状态
+    :search <关键词>  搜索记忆
+    :who              你是谁
+  `))
+}

@@ -1,1 +1,2 @@
-console.log('76wenshu');
+#!/usr/bin/env node
+require('../dist/index.js')
