@@ -29,9 +29,26 @@ export {
 export {
   detectEmotion,
   getWarmResponse,
-  getEncouragement,
-  getCareMessage
+  getEncouragement as getEmotionEncouragement,
+  getCareMessage as getEmotionCareMessage
 } from './emotion'
+// 伙伴系统
+export {
+  loadInteraction,
+  updateInteraction,
+  checkNeedCare,
+  checkTopicRecall,
+  getConsecutiveDays,
+  detectPromise,
+  addPromise,
+  getUnfulfilledPromises,
+  markPromiseReminded,
+  getEncouragement,
+  getCareMessage,
+  getCasualReply,
+  type InteractionRecord,
+  type PromiseRecord
+} from './companion'
 // 新一代进化系统
 export {
   loadEvolutionState,

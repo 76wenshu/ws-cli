@@ -4,7 +4,7 @@ import { compressMessages, buildContext, MemoryBlock, Message } from '../memory/
 import { createLLMProvider, Message as LLMMessage } from '../llm'
 import { loadConfig } from '../config'
 import { executePlugin, pluginManager } from '../plugins'
-import { learnFromText, addFeedback, getFeedbackStats, formatHistory, addEvent, getPreferencePrompt, getProfilePrompt, learnProfileFromText, addReminder, loadReminders, completeReminder, deleteReminder, getUpcomingReminders, parseTimeString, formatReminderTime, detectEmotion, getWarmResponse, getCareMessage } from '../evolve'
+import { learnFromText, addFeedback, getFeedbackStats, formatHistory, addEvent, getPreferencePrompt, getProfilePrompt, learnProfileFromText, addReminder, loadReminders, completeReminder, deleteReminder, getUpcomingReminders, parseTimeString, formatReminderTime, detectEmotion, getWarmResponse, updateInteraction, checkNeedCare, checkTopicRecall, getConsecutiveDays, detectPromise, addPromise, getUnfulfilledPromises, markPromiseReminded, getEncouragement, getCareMessage, getCasualReply } from '../evolve'
 import { addXp, recordPattern, getEvolutionPrompt, getEvolutionSummary, updatePersonality } from '../evolve'
 import { exportData, importData, getSyncManager } from '../sync'
 
@@ -524,13 +524,12 @@ async function checkCompress(memory: FullMemory): Promise<void> {
   }
 }
 
+
 // 处理用户输入
 export async function processInput(input: string, memory: FullMemory): Promise<string> {
   try {
-    // 0. 尝试执行插件
     const pluginResult = await executePlugin(input, { memory })
     if (pluginResult) {
-      // 保存到记忆
       memory.hot.push(
         { role: 'user', content: input, timestamp: Date.now() },
         { role: 'assistant', content: pluginResult.content, timestamp: Date.now() }
@@ -546,36 +545,62 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
       const match = input.match(rule.pattern)
       if (match) {
         const result = await rule.response(match, memory)
+        if (result === null) continue
 
-        // 如果返回 null，继续下一个规则
-        if (result === null) {
-          continue
+        memory.hot.push(
+          { role: 'user', content: input, timestamp: Date.now() },
+          { role: 'assistant', content: result, timestamp: Date.now() }
+        )
+        memory.stats.total++
+        await saveHotMemory(memory.hot)
+        await checkCompress(memory)
+        await saveFullMemory(memory)
+        return result
       }
-
-      // 规则匹配后保存到 hot
-      memory.hot.push(
-        { role: 'user', content: input, timestamp: Date.now() },
-        { role: 'assistant', content: result, timestamp: Date.now() }
-      )
-      memory.stats.total++
-
-      // 自动保存和压缩
-      await saveHotMemory(memory.hot)
-      await checkCompress(memory)
-      await saveFullMemory(memory)
-
-      return result
     }
+  } catch (error: any) {
+    console.error(chalk.red(`[处理出错] ${error.message}`))
+    return `抱歉，我遇到了问题: ${error.message}`
   }
 
   // 2. 无规则匹配，调用 LLM
-  const response = await callLLM(input, memory)
+  try {
+    // 伙伴功能：检测用户是否做出承诺
+    const promiseText = detectPromise(input)
+    if (promiseText) {
+      await addPromise(promiseText)
+    }
 
-  // 检测用户情绪，如果检测到负面情绪，添加温暖回应
-  const emotion = detectEmotion(input)
-  if (emotion && emotion !== 'happy') {
-    const warmResponse = getWarmResponse(emotion)
-    const finalResponse = response + '\n\n' + warmResponse
+    // 检查是否需要主动关心
+    const careMessage = await checkNeedCare()
+
+    // 检查是否应该提起上次话题
+    const recallMessage = await checkTopicRecall()
+
+    // 检测用户情绪
+    const emotion = detectEmotion(input)
+
+    const response = await callLLM(input, memory)
+
+    // 在响应前添加主动关心或回忆
+    let finalResponse = response
+    if (careMessage) {
+      finalResponse = careMessage + '\n\n' + response
+    } else if (recallMessage) {
+      finalResponse = recallMessage + '\n\n' + response
+    }
+
+    // 偶尔添加伙伴式的随意回复
+    const casualReply = getCasualReply()
+    if (casualReply && !finalResponse.includes(casualReply)) {
+      finalResponse = finalResponse + '\n\n' + casualReply
+    }
+
+    // 如果检测到负面情绪，添加温暖回应
+    if (emotion && emotion !== 'happy') {
+      const warmResponse = getWarmResponse(emotion)
+      finalResponse = finalResponse + '\n\n' + warmResponse
+    }
 
     // 保存对话
     memory.hot.push(
@@ -584,7 +609,6 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
     )
     memory.stats.total++
 
-    // 自动保存和压缩
     await saveHotMemory(memory.hot)
     await checkCompress(memory)
     await saveFullMemory(memory)
@@ -594,10 +618,12 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
     await learnProfileFromText(input)
     await addEvent('memory', '新对话', `用户: ${input.slice(0, 20)}`)
 
-    // 记录交互模式并增加经验（进化）
+    // 更新交互记录（伙伴功能）
+    await updateInteraction(input.slice(0, 30), emotion || undefined)
+
+    // 记录交互模式并增加经验
     await recordPattern(input, finalResponse)
 
-    // 简单判断应该给什么技能增加经验
     const inputLower = input.toLowerCase()
     if (input.match(/^[\d\s+\-*/().]+$/) || input.includes('计算')) {
       await addXp('calc', 5)
@@ -608,54 +634,15 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
     } else if (input.includes('代码') || input.includes('编程')) {
       await addXp('code', 15)
     } else {
-      // 默认对话也给经验
       await addXp('analysis', 2)
     }
 
     return finalResponse
-  }
-  memory.hot.push(
-    { role: 'user', content: input, timestamp: Date.now() },
-    { role: 'assistant', content: response, timestamp: Date.now() }
-  )
-  memory.stats.total++
-
-  // 自动保存和压缩
-  await saveHotMemory(memory.hot)
-  await checkCompress(memory)
-  await saveFullMemory(memory)
-
-  // 学习用户输入中的偏好
-  await learnFromText(input)
-  await learnProfileFromText(input)
-  await addEvent('memory', '新对话', `用户: ${input.slice(0, 20)}`)
-
-  // 记录交互模式并增加经验（进化）
-  await recordPattern(input, response)
-
-  // 简单判断应该给什么技能增加经验
-  const inputLower = input.toLowerCase()
-  if (input.match(/^[\d\s+\-*/().]+$/) || input.includes('计算')) {
-    await addXp('calc', 5)
-  } else if (input.includes('时间') || input.includes('日期')) {
-    await addXp('time', 5)
-  } else if (input.includes('搜索') || input.includes('查一下')) {
-    await addXp('search', 10)
-  } else if (input.includes('代码') || input.includes('编程')) {
-    await addXp('code', 15)
-  } else {
-    // 默认对话也给经验
-    await addXp('analysis', 2)
-  }
-
-  return response
   } catch (error: any) {
     console.error(chalk.red(`[处理出错] ${error.message}`))
     return `抱歉，我遇到了问题: ${error.message}`
   }
 }
-
-// 重置 LLM 连接
 export async function resetLLM() {
   llmProvider = null
 }
