@@ -27,7 +27,42 @@ async function getLLMProvider() {
 // 预设回复规则（仅命令类，快速响应不走LLM）
 // 核心原则：只保留命令规则（以:开头），其他交互全部走LLM
 // response 返回 null 表示不匹配，继续下一个规则
-const rules: Array<{ pattern: RegExp; response: (match: string[], memory: FullMemory) => string | Promise<string> | null }> = [
+const rules: Array<{ pattern: RegExp; response: (match: string[], memory: FullMemory) => string | null | Promise<string | null> }> = [
+  {
+    // 自然语言提醒识别：提醒我X点Y
+    pattern: /(?:提醒|设置提醒|定个提醒|帮我定|提醒一下)(?:我|个?)?(.+?)(?:在|于|到|是)?(\d{1,2}[点:]\d{1,2}|\d{1,2}点\d{1,2}?|下午|上午|早上|晚上|\d+[时分]|\d+分钟|\d+小时后)/i,
+    response: async (match, _memory): Promise<string | null> => {
+      const content = match[1]?.trim() || ''
+      const timeStr = match[2]?.trim() || ''
+
+      // 合并提取的时间字符串
+      const fullTimeStr = timeStr + (match[0].includes('提醒') ? '' : '')
+      const time = parseTimeString(fullTimeStr)
+
+      if (!time) {
+        return null // 无法解析时间，继续走LLM
+      }
+
+      // 构建提醒内容
+      const reminderContent = content.replace(/^(我|个)?/, '').trim() || '提醒事项'
+      const reminder = await addReminder(reminderContent, time)
+      return `✅ 已设置提醒：${reminderContent}\n${formatReminderTime(reminder.time)}`
+    }
+  },
+  {
+    // 简单时间提醒：8点17提醒我吃饭
+    pattern: /^(\d{1,2}[点:]\d{1,2}|\d{1,2}点\d{1,2}?|下午\d{1,2}点|早上\d{1,2}点|晚上\d{1,2}点)\s*(提醒|叫我|喊我)(.+)/i,
+    response: async (match, _memory): Promise<string | null> => {
+      const timeStr = match[1]
+      const content = match[3]?.trim() || '提醒事项'
+      const time = parseTimeString(timeStr)
+
+      if (!time) return null
+
+      const reminder = await addReminder(content, time)
+      return `✅ 已设置提醒：${content}\n${formatReminderTime(reminder.time)}`
+    }
+  },
   {
     // 用户画像命令
     pattern: /^:profile|:画像/i,
