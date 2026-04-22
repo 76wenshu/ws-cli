@@ -7,6 +7,7 @@ import { executePlugin, pluginManager } from '../plugins'
 import { learnFromText, addFeedback, getFeedbackStats, formatHistory, addEvent, getPreferencePrompt, getProfilePrompt, learnProfileFromText, addReminder, loadReminders, completeReminder, deleteReminder, getUpcomingReminders, parseTimeString, formatReminderTime, detectEmotion, getWarmResponse, updateInteraction, checkNeedCare, checkTopicRecall, getConsecutiveDays, detectPromise, addPromise, getUnfulfilledPromises, markPromiseReminded, getEncouragement, getCareMessage, getCasualReply } from '../evolve'
 import { addXp, recordPattern, getEvolutionPrompt, getEvolutionSummary, updatePersonality } from '../evolve'
 import { exportData, importData, getSyncManager } from '../sync'
+import { error as logError, info, warn, debug } from '../utils/logger'
 
 const CONFIG = {
   HOT_SIZE: 20,
@@ -559,8 +560,10 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
       }
     }
   } catch (error: any) {
-    console.error(chalk.red(`[处理出错] ${error.message}`))
-    return `抱歉，我遇到了问题: ${error.message}`
+    const errMsg = error.message || String(error)
+    console.error(chalk.red(`[处理出错] ${errMsg}`))
+    await logError('processInput', `插件/规则执行出错: ${errMsg}`, { input: input.slice(0, 50), stack: error.stack })
+    return `抱歉，我遇到了点问题: ${errMsg}`
   }
 
   // 2. 无规则匹配，调用 LLM
@@ -639,8 +642,10 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
 
     return finalResponse
   } catch (error: any) {
-    console.error(chalk.red(`[处理出错] ${error.message}`))
-    return `抱歉，我遇到了问题: ${error.message}`
+    const errMsg = error.message || String(error)
+    console.error(chalk.red(`[处理出错] ${errMsg}`))
+    await logError('processInput', `LLM处理出错: ${errMsg}`, { input: input.slice(0, 100), stack: error.stack })
+    return `抱歉，我遇到了点问题: ${errMsg}`
   }
 }
 export async function resetLLM() {

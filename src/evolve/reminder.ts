@@ -172,6 +172,28 @@ export function parseTimeString(timeStr: string): number | null {
     return date.getTime()
   }
 
+  // 格式: 8点17 / 8点 / 下午3点
+  const dianMatch = timeStr.match(/([上下午晚早上]?)\s*(\d{1,2})点(\d{1,2})?/)
+  if (dianMatch) {
+    const [, prefix, hourStr, minuteStr = '0'] = dianMatch
+    let hour = parseInt(hourStr)
+
+    // 处理前缀
+    if (prefix === '下午' || prefix === '晚') {
+      hour += 12
+    } else if (prefix === '早上' || prefix === '上午') {
+      // 保持不变
+    }
+
+    const date = new Date()
+    date.setHours(hour, parseInt(minuteStr), 0, 0)
+    // 如果时间已过，算明天
+    if (date.getTime() <= now.getTime()) {
+      date.setDate(date.getDate() + 1)
+    }
+    return date.getTime()
+  }
+
   // 相对时间: 30分钟后, 2小时后, 1天后
   const relativeMatch = timeStr.match(/(\d+)(分钟|小时|天)后/)
   if (relativeMatch) {

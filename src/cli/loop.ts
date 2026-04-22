@@ -2,6 +2,7 @@ import chalk from 'chalk'
 import inquirer from 'inquirer'
 import { processInput } from '../core/engine'
 import { loadFullMemory, FullMemory } from '../memory'
+import { getErrorLogs, formatLogs, getRecentLogs } from '../utils/logger'
 
 const PROMPT = chalk.cyan('HandSome') + chalk.gray(' > ')
 
@@ -52,6 +53,19 @@ export async function run() {
     } catch (error: any) {
       console.log(chalk.red(`\n出了问题: ${error.message}\n`))
     }
+
+    // 查看日志命令
+    if (trimmed === ':logs' || trimmed === ':日志') {
+      const logs = await getErrorLogs(10)
+      if (logs.length === 0) {
+        console.log(chalk.gray('  没有错误日志~\n'))
+      } else {
+        console.log(chalk.yellow('=== 最近错误日志 ===\n'))
+        console.log(formatLogs(logs))
+        console.log(chalk.yellow('=====================\n'))
+      }
+      continue
+    }
   }
 }
 
@@ -66,5 +80,6 @@ function printHelp() {
     :sync on            开启局域网同步
     :export             导出数据
     :evolve             查看成长状态
+    :logs, :日志        查看错误日志
   `))
 }
