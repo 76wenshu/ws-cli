@@ -14,10 +14,23 @@ const CONFIG = {
 
 // ============ 基础类型 ============
 
+// 用户画像
+export interface UserProfile {
+  name?: string
+  job?: string        // 职业
+  skills?: string[]   // 技能
+  interests?: string[] // 兴趣
+  location?: string   // 位置
+  goals?: string[]    // 目标
+  bio?: string        // 个人简介
+  updated: number     // 更新时间
+}
+
 export interface Memory {
   user: {
     name?: string
     preferences: Record<string, any>
+    profile?: UserProfile  // 用户画像
   }
   // 统计信息
   stats: {

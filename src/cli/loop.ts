@@ -57,12 +57,14 @@ export async function run() {
 
 function printHelp() {
   console.log(chalk.gray(`
-  可用命令:
-    :q, quit, exit    退出
-    :help, help       显示帮助
-    :forget           清除所有记忆
-    :memory, :记忆    查看记忆状态
-    :search <关键词>  搜索记忆
-    :who              你是谁
+  常用命令:
+    :q, quit, exit      退出
+    :profile            查看/设置用户画像
+    :memory, :记忆      查看记忆状态
+    :search <关键词>    搜索记忆
+    :forget             清除所有记忆
+    :sync on            开启局域网同步
+    :export             导出数据
+    :evolve             查看成长状态
   `))
 }

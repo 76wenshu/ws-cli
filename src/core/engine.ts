@@ -4,7 +4,7 @@ import { compressMessages, buildContext, MemoryBlock, Message } from '../memory/
 import { createLLMProvider, Message as LLMMessage } from '../llm'
 import { loadConfig } from '../config'
 import { executePlugin, pluginManager } from '../plugins'
-import { learnFromText, addFeedback, getFeedbackStats, formatHistory, addEvent, getPreferencePrompt } from '../evolve'
+import { learnFromText, addFeedback, getFeedbackStats, formatHistory, addEvent, getPreferencePrompt, getProfilePrompt, learnProfileFromText, addReminder, loadReminders, completeReminder, deleteReminder, getUpcomingReminders, parseTimeString, formatReminderTime, detectEmotion, getWarmResponse, getCareMessage } from '../evolve'
 import { addXp, recordPattern, getEvolutionPrompt, getEvolutionSummary, updatePersonality } from '../evolve'
 import { exportData, importData, getSyncManager } from '../sync'
 
@@ -27,6 +27,60 @@ async function getLLMProvider() {
 // 核心原则：只保留命令规则（以:开头），其他交互全部走LLM
 // response 返回 null 表示不匹配，继续下一个规则
 const rules: Array<{ pattern: RegExp; response: (match: string[], memory: FullMemory) => string | Promise<string> | null }> = [
+  {
+    // 用户画像命令
+    pattern: /^:profile|:画像/i,
+    response: async (match, memory) => {
+      const { getProfile, updateProfile, loadProfile } = await import('../evolve/profile')
+      const args = match[1]?.trim().split(/\s+/) || []
+      const subCmd = args[0]?.toLowerCase()
+
+      // :profile - 查看画像
+      if (!subCmd || subCmd === 'view' || subCmd === '查看') {
+        const profile = await loadProfile()
+        if (!profile.name) {
+          return '我还不了解你，告诉我更多吧！\n用法：:profile set job 程序员'
+        }
+        let info = `【用户画像】\n名字: ${profile.name}`
+        if (profile.job) info += `\n职业: ${profile.job}`
+        if (profile.skills?.length) info += `\n技能: ${profile.skills.join(', ')}`
+        if (profile.interests?.length) info += `\n兴趣: ${profile.interests.join(', ')}`
+        if (profile.location) info += `\n位置: ${profile.location}`
+        if (profile.goals?.length) info += `\n目标: ${profile.goals.join(', ')}`
+        if (profile.bio) info += `\n简介: ${profile.bio}`
+        return info
+      }
+
+      // :profile set <字段> <值>
+      if (subCmd === 'set' || subCmd === '设置') {
+        const field = args[1]
+        const value = args.slice(2).join(' ')
+        if (!field || !value) {
+          return '用法：:profile set <字段> <值>\n示例：:profile set job 程序员'
+        }
+
+        const validFields = ['job', 'skills', 'interests', 'location', 'goals', 'bio']
+        if (!validFields.includes(field)) {
+          return `可用字段: ${validFields.join(', ')}`
+        }
+
+        let updateValue: any = value
+        if (field === 'skills' || field === 'interests' || field === 'goals') {
+          updateValue = value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+        }
+
+        await updateProfile({ [field]: updateValue })
+        return `✅ 已更新 ${field}: ${value}`
+      }
+
+      return `用户画像命令：
+• :profile - 查看画像
+• :profile set job 程序员 - 设置职业
+• :profile set skills 编程,设计 - 设置技能
+• :profile set interests 音乐,阅读 - 设置兴趣
+• :profile set goals 学习AI - 设置目标`
+    }
+  },
   {
     pattern: /^:who/i,
     response: (_, memory) => {
@@ -90,6 +144,107 @@ const rules: Array<{ pattern: RegExp; response: (match: string[], memory: FullMe
         msg += `  触发: ${p.triggers.join(', ')}\n\n`
       }
       return msg
+    }
+  },
+  {
+    // 提醒命令
+    pattern: /^:remind|:提醒/i,
+    response: async (match) => {
+      const args = (match[1] || '').trim().split(/\s+/)
+      const subCmd = args[0]?.toLowerCase()
+
+      // :remind - 查看提醒
+      if (!subCmd) {
+        const reminders = await getUpcomingReminders(5)
+        if (reminders.length === 0) {
+          return '📝 当前没有提醒'
+        }
+        let msg = '📝 即将到来的提醒：\n'
+        for (const r of reminders) {
+          msg += `\n• ${r.content}\n  ${formatReminderTime(r.time)}`
+        }
+        return msg
+      }
+
+      // :remind add <内容> <时间>
+      if (subCmd === 'add' || subCmd === '添加') {
+        // 查找时间参数
+        let content = ''
+        let time: number | null = null
+
+        // 尝试解析时间
+        for (let i = 1; i < args.length; i++) {
+          const parsed = parseTimeString(args[i])
+          if (parsed) {
+            time = parsed
+            content = args.slice(1, i).join(' ')
+            break
+          }
+        }
+
+        // 如果没找到时间参数，整条作为内容，设置为1小时后
+        if (!time && args.length > 1) {
+          content = args.slice(1).join(' ')
+          time = Date.now() + 60 * 60 * 1000 // 默认1小时后
+        }
+
+        if (!time || !content) {
+          return `用法：
+:remind add <内容> <时间>
+时间格式：HH:mm、MM-DD HH:mm、30分钟后、2小时后、1天后`
+        }
+
+        const reminder = await addReminder(content, time)
+        return `✅ 已设置提醒：${content}\n${formatReminderTime(reminder.time)}`
+      }
+
+      // :remind list - 列表
+      if (subCmd === 'list' || subCmd === '列表') {
+        const reminders = await loadReminders()
+        const pending = reminders.filter(r => !r.done)
+        if (pending.length === 0) {
+          return '📝 没有待处理提醒'
+        }
+        let msg = '📝 待处理提醒：\n'
+        for (const r of pending) {
+          msg += `\n• ${r.content}\n  ${formatReminderTime(r.time)}\n  ID: ${r.id.slice(0, 8)}`
+        }
+        return msg
+      }
+
+      // :remind done <ID> - 完成
+      if (subCmd === 'done' || subCmd === '完成') {
+        const id = args[1]
+        if (!id) {
+          return '用法：:remind done <ID>'
+        }
+        const success = await completeReminder(id)
+        return success ? '✅ 提醒已完成' : '❌ 找不到该提醒'
+      }
+
+      // :remind del <ID> - 删除
+      if (subCmd === 'del' || subCmd === 'delete' || subCmd === '删除') {
+        const id = args[1]
+        if (!id) {
+          return '用法：:remind del <ID>'
+        }
+        const success = await deleteReminder(id)
+        return success ? '✅ 提醒已删除' : '❌ 找不到该提醒'
+      }
+
+      return `提醒命令：
+:remind - 查看即将到来的提醒
+:remind add <内容> <时间> - 添加提醒
+:remind list - 查看所有提醒
+:remind done <ID> - 标记完成
+:remind del <ID> - 删除提醒
+
+时间格式示例：
+  14:30      今天14:30
+  05-22 09:00 5月22日早上9点
+  30分钟后    30分钟后
+  2小时后    2小时后
+  1天后      明天此时`
     }
   },
   {
@@ -246,6 +401,12 @@ async function buildLLMMessages(input: string, memory: FullMemory): Promise<LLMM
   // 添加用户信息
   if (memory.user.name) {
     systemPrompt += `\n用户名字: ${memory.user.name}`
+  }
+
+  // 添加用户画像
+  const profilePrompt = await getProfilePrompt()
+  if (profilePrompt) {
+    systemPrompt += profilePrompt
   }
 
   // 添加偏好提示
@@ -410,7 +571,49 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
   // 2. 无规则匹配，调用 LLM
   const response = await callLLM(input, memory)
 
-  // 保存对话
+  // 检测用户情绪，如果检测到负面情绪，添加温暖回应
+  const emotion = detectEmotion(input)
+  if (emotion && emotion !== 'happy') {
+    const warmResponse = getWarmResponse(emotion)
+    const finalResponse = response + '\n\n' + warmResponse
+
+    // 保存对话
+    memory.hot.push(
+      { role: 'user', content: input, timestamp: Date.now() },
+      { role: 'assistant', content: finalResponse, timestamp: Date.now() }
+    )
+    memory.stats.total++
+
+    // 自动保存和压缩
+    await saveHotMemory(memory.hot)
+    await checkCompress(memory)
+    await saveFullMemory(memory)
+
+    // 学习用户输入中的偏好
+    await learnFromText(input)
+    await learnProfileFromText(input)
+    await addEvent('memory', '新对话', `用户: ${input.slice(0, 20)}`)
+
+    // 记录交互模式并增加经验（进化）
+    await recordPattern(input, finalResponse)
+
+    // 简单判断应该给什么技能增加经验
+    const inputLower = input.toLowerCase()
+    if (input.match(/^[\d\s+\-*/().]+$/) || input.includes('计算')) {
+      await addXp('calc', 5)
+    } else if (input.includes('时间') || input.includes('日期')) {
+      await addXp('time', 5)
+    } else if (input.includes('搜索') || input.includes('查一下')) {
+      await addXp('search', 10)
+    } else if (input.includes('代码') || input.includes('编程')) {
+      await addXp('code', 15)
+    } else {
+      // 默认对话也给经验
+      await addXp('analysis', 2)
+    }
+
+    return finalResponse
+  }
   memory.hot.push(
     { role: 'user', content: input, timestamp: Date.now() },
     { role: 'assistant', content: response, timestamp: Date.now() }
@@ -424,6 +627,7 @@ export async function processInput(input: string, memory: FullMemory): Promise<s
 
   // 学习用户输入中的偏好
   await learnFromText(input)
+  await learnProfileFromText(input)
   await addEvent('memory', '新对话', `用户: ${input.slice(0, 20)}`)
 
   // 记录交互模式并增加经验（进化）

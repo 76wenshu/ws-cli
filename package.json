@@ -1,7 +1,7 @@
 {
   "name": "handsome-cli",
   "version": "1.0.0",
-  "description": "HandSome - 你的个人终端助手",
+  "description": "HandSome - 你的双胞胎伙伴，陪你一起成长",
   "main": "dist/index.js",
   "bin": {
     "handsome": "./dist/index.js"
